@@ -63,7 +63,7 @@ app.post("/register", async (req, res) => {
       password: hashedPassword
     });
 
-    await user.save(); // 🔥 THIS FIXES EMPTY DATABASE
+    await user.save();
 
     res.json({ success: true, message: "User registered successfully" });
 
@@ -73,7 +73,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
-/* ---------- LOGIN (JWT) ---------- */
+/* ---------- LOGIN ---------- */
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
