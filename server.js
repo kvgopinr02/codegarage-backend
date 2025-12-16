@@ -32,18 +32,14 @@ const User = mongoose.model("User", userSchema);
 
 /* ---------- FEEDBACK SCHEMA ---------- */
 const feedbackSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true
-  },
+  email: { type: String, required: true },   // ✅ ADD THIS
+  name: { type: String, required: true },
   experience: String,
   problems: String,
   suggestions: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  createdAt: { type: Date, default: Date.now }
 });
+
 
 const Feedback = mongoose.model("Feedback", feedbackSchema);
 
@@ -113,25 +109,21 @@ app.get("/users/count", async (req, res) => {
 /* ================= FEEDBACK API ================= */
 
 /* USER SUBMIT FEEDBACK */
-app.post("/feedback", async (req, res) => {
+app.post("/feedback", auth, async (req, res) => {
   const { name, experience, problems, suggestions } = req.body;
 
-  if (!name) {
-    return res.status(400).json({ message: "Name is required" });
-  }
-
   const feedback = await Feedback.create({
+    email: req.user.email,
     name,
     experience,
     problems,
     suggestions
   });
 
-  res.json({
-    success: true,
-    createdAt: feedback.createdAt
-  });
+  res.json({ success: true });
 });
+
+
 
 /* ADMIN VIEW FEEDBACK */
 app.get("/feedback/admin", async (req, res) => {
