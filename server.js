@@ -9,11 +9,7 @@ dotenv.config();
 const app = express();
 
 /* ---------- MIDDLEWARE ---------- */
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+app.use(cors());
 app.use(express.json());
 
 /* ---------- MONGODB CONNECTION ---------- */
@@ -24,141 +20,106 @@ mongoose
 
 /* ---------- USER SCHEMA ---------- */
 const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  password: {
-    type: String,
-    required: true
-  }
+  username: String,
+  email: { type: String, unique: true },
+  password: String
 }, { timestamps: true });
 
 const User = mongoose.model("User", userSchema);
 
+/* ---------- FEEDBACK SCHEMA ---------- */
+const feedbackSchema = new mongoose.Schema({
+  name: String,
+  experience: String,
+  problems: String,
+  suggestions: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Feedback = mongoose.model("Feedback", feedbackSchema);
+
 /* ---------- REGISTER ---------- */
 app.post("/register", async (req, res) => {
-  try {
-    const { username, email, password } = req.body;
+  const { username, email, password } = req.body;
 
-    if (!username || !email || !password) {
-      return res.json({ success: false, message: "All fields required" });
-    }
+  if (!username || !email || !password)
+    return res.json({ success: false });
 
-    const exists = await User.findOne({ email });
-    if (exists) {
-      return res.json({ success: false, message: "User already exists" });
-    }
+  const exists = await User.findOne({ email });
+  if (exists) return res.json({ success: false });
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 10);
+  await User.create({ username, email, password: hash });
 
-    const user = new User({
-      username,
-      email,
-      password: hashedPassword
-    });
-
-    await user.save();
-
-    res.json({ success: true, message: "User registered successfully" });
-
-  } catch (error) {
-    console.error("REGISTER ERROR:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
+  res.json({ success: true });
 });
 
 /* ---------- LOGIN ---------- */
 app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.json({ success: false, message: "User not found" });
-    }
+  const user = await User.findOne({ email });
+  if (!user) return res.json({ success: false });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.json({ success: false, message: "Invalid credentials" });
-    }
+  const ok = await bcrypt.compare(password, user.password);
+  if (!ok) return res.json({ success: false });
 
-    const token = jwt.sign(
-      {
-        id: user._id,
-        email: user.email,
-        username: user.username
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
+  const token = jwt.sign(
+    { id: user._id, username: user.username },
+    process.env.JWT_SECRET,
+    { expiresIn: "1h" }
+  );
 
-    res.json({ success: true, token });
-
-  } catch (error) {
-    console.error("LOGIN ERROR:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
+  res.json({ success: true, token });
 });
 
-/* ---------- JWT AUTH MIDDLEWARE ---------- */
+/* ---------- AUTH ---------- */
 const auth = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
-  }
-
-  const token = authHeader.split(" ")[1];
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({});
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();
-  } catch (error) {
-    return res.status(401).json({ message: "Invalid token" });
+  } catch {
+    res.status(401).json({});
   }
 };
 
 /* ---------- PROFILE ---------- */
 app.get("/profile", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select("-password");
-
-    if (!user) {
-      return res.status(404).json({ success: false });
-    }
-
-    res.json({
-      success: true,
-      user: {
-        username: user.username,
-        email: user.email
-      }
-    });
-
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+  const user = await User.findById(req.user.id).select("-password");
+  res.json({ success: true, user });
 });
 
-/* ---------- TOTAL USERS COUNT ---------- */
+/* ---------- USERS COUNT ---------- */
 app.get("/users/count", async (req, res) => {
-  try {
-    const count = await User.countDocuments();
-    res.json({ count });
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
-  }
+  const count = await User.countDocuments();
+  res.json({ count });
 });
 
-/* ---------- SERVER START ---------- */
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+/* ================= FEEDBACK API ================= */
+
+/* USER SUBMIT FEEDBACK */
+app.post("/feedback", async (req, res) => {
+  await Feedback.create(req.body);
+  res.json({ success: true });
 });
+
+/* ADMIN VIEW FEEDBACK */
+app.get("/feedback/admin", async (req, res) => {
+  const adminSecret = req.headers["admin-secret"];
+
+  if (adminSecret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
+
+  const data = await Feedback.find().sort({ createdAt: -1 });
+  res.json(data);
+});
+
+/* ---------- SERVER ---------- */
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
