@@ -19,21 +19,30 @@ mongoose
   .catch((err) => console.log("❌ MongoDB Error:", err));
 
 /* ---------- USER SCHEMA ---------- */
-const userSchema = new mongoose.Schema({
-  username: String,
-  email: { type: String, unique: true },
-  password: String
-}, { timestamps: true });
+const userSchema = new mongoose.Schema(
+  {
+    username: String,
+    email: { type: String, unique: true },
+    password: String
+  },
+  { timestamps: true }
+);
 
 const User = mongoose.model("User", userSchema);
 
 /* ---------- FEEDBACK SCHEMA ---------- */
 const feedbackSchema = new mongoose.Schema({
-  name: String,
+  name: {
+    type: String,
+    required: true
+  },
   experience: String,
   problems: String,
   suggestions: String,
-  createdAt: { type: Date, default: Date.now }
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
 });
 
 const Feedback = mongoose.model("Feedback", feedbackSchema);
@@ -43,10 +52,11 @@ app.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
 
   if (!username || !email || !password)
-    return res.json({ success: false });
+    return res.json({ success: false, message: "All fields required" });
 
   const exists = await User.findOne({ email });
-  if (exists) return res.json({ success: false });
+  if (exists)
+    return res.json({ success: false, message: "User already exists" });
 
   const hash = await bcrypt.hash(password, 10);
   await User.create({ username, email, password: hash });
@@ -59,10 +69,12 @@ app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   const user = await User.findOne({ email });
-  if (!user) return res.json({ success: false });
+  if (!user)
+    return res.json({ success: false, message: "User not found" });
 
   const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.json({ success: false });
+  if (!ok)
+    return res.json({ success: false, message: "Invalid credentials" });
 
   const token = jwt.sign(
     { id: user._id, username: user.username },
@@ -102,8 +114,23 @@ app.get("/users/count", async (req, res) => {
 
 /* USER SUBMIT FEEDBACK */
 app.post("/feedback", async (req, res) => {
-  await Feedback.create(req.body);
-  res.json({ success: true });
+  const { name, experience, problems, suggestions } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ message: "Name is required" });
+  }
+
+  const feedback = await Feedback.create({
+    name,
+    experience,
+    problems,
+    suggestions
+  });
+
+  res.json({
+    success: true,
+    createdAt: feedback.createdAt
+  });
 });
 
 /* ADMIN VIEW FEEDBACK */
