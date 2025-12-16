@@ -13,46 +13,32 @@ app.use(cors());
 app.use(express.json());
 
 /* ---------- MONGODB CONNECTION ---------- */
-mongoose
-  .connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.log("❌ MongoDB Error:", err));
+  .catch(err => console.log("❌ MongoDB Error:", err));
 
 /* ---------- USER SCHEMA ---------- */
-const userSchema = new mongoose.Schema(
-  {
-    username: String,
-    email: { type: String, unique: true },
-    password: String
-  },
-  { timestamps: true }
-);
-
+const userSchema = new mongoose.Schema({
+  username: String,
+  email: { type: String, unique: true },
+  password: String
+});
 const User = mongoose.model("User", userSchema);
 
 /* ---------- FEEDBACK SCHEMA ---------- */
 const feedbackSchema = new mongoose.Schema({
-  email: { type: String, required: true },   // ✅ ADD THIS
+  email: { type: String, required: true },
   name: { type: String, required: true },
   experience: String,
   problems: String,
   suggestions: String,
   createdAt: { type: Date, default: Date.now }
 });
-
-
 const Feedback = mongoose.model("Feedback", feedbackSchema);
 
 /* ---------- REGISTER ---------- */
 app.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
-
-  if (!username || !email || !password)
-    return res.json({ success: false, message: "All fields required" });
-
-  const exists = await User.findOne({ email });
-  if (exists)
-    return res.json({ success: false, message: "User already exists" });
 
   const hash = await bcrypt.hash(password, 10);
   await User.create({ username, email, password: hash });
@@ -65,28 +51,27 @@ app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   const user = await User.findOne({ email });
-  if (!user)
-    return res.json({ success: false, message: "User not found" });
+  if (!user) return res.status(401).json({});
 
   const ok = await bcrypt.compare(password, user.password);
-  if (!ok)
-    return res.json({ success: false, message: "Invalid credentials" });
+  if (!ok) return res.status(401).json({});
 
   const token = jwt.sign(
-    { id: user._id, username: user.username },
+    { id: user._id, email: user.email },
     process.env.JWT_SECRET,
     { expiresIn: "1h" }
   );
 
-  res.json({ success: true, token });
+  res.json({ token });
 });
 
 /* ---------- AUTH ---------- */
 const auth = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({});
+  const header = req.headers.authorization;
+  if (!header) return res.status(401).json({});
 
   try {
+    const token = header.split(" ")[1];
     req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();
   } catch {
@@ -94,21 +79,7 @@ const auth = (req, res, next) => {
   }
 };
 
-/* ---------- PROFILE ---------- */
-app.get("/profile", auth, async (req, res) => {
-  const user = await User.findById(req.user.id).select("-password");
-  res.json({ success: true, user });
-});
-
-/* ---------- USERS COUNT ---------- */
-app.get("/users/count", async (req, res) => {
-  const count = await User.countDocuments();
-  res.json({ count });
-});
-
-/* ================= FEEDBACK API ================= */
-
-/* USER SUBMIT FEEDBACK */
+/* ---------- FEEDBACK SUBMIT ---------- */
 app.post("/feedback", auth, async (req, res) => {
   const { name, experience, problems, suggestions } = req.body;
 
@@ -120,25 +91,19 @@ app.post("/feedback", auth, async (req, res) => {
     suggestions
   });
 
-  res.json({ success: true });
+  res.json({ success: true, createdAt: feedback.createdAt });
 });
 
-
-
-/* ADMIN VIEW FEEDBACK */
+/* ---------- ADMIN VIEW ---------- */
 app.get("/feedback/admin", async (req, res) => {
-  const adminSecret = req.headers["admin-secret"];
-
-  if (adminSecret !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ message: "Unauthorized" });
-  }
+  if (req.headers["admin-secret"] !== process.env.ADMIN_SECRET)
+    return res.status(403).json({});
 
   const data = await Feedback.find().sort({ createdAt: -1 });
   res.json(data);
 });
 
 /* ---------- SERVER ---------- */
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
+app.listen(5000, () =>
+  console.log("🚀 Server running on port 5000")
 );
