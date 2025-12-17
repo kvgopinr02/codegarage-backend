@@ -9,101 +9,156 @@ dotenv.config();
 const app = express();
 
 /* ---------- MIDDLEWARE ---------- */
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
 
 /* ---------- MONGODB CONNECTION ---------- */
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.log("❌ MongoDB Error:", err));
+  .catch((err) => console.log("❌ MongoDB Error:", err));
 
 /* ---------- USER SCHEMA ---------- */
 const userSchema = new mongoose.Schema({
-  username: String,
-  email: { type: String, unique: true },
-  password: String
-});
-const User = mongoose.model("User", userSchema);
+  username: {
+    type: String,
+    required: true
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  password: {
+    type: String,
+    required: true
+  }
+}, { timestamps: true });
 
-/* ---------- FEEDBACK SCHEMA ---------- */
-const feedbackSchema = new mongoose.Schema({
-  email: { type: String, required: true },
-  name: { type: String, required: true },
-  experience: String,
-  problems: String,
-  suggestions: String,
-  createdAt: { type: Date, default: Date.now }
-});
-const Feedback = mongoose.model("Feedback", feedbackSchema);
+const User = mongoose.model("User", userSchema);
 
 /* ---------- REGISTER ---------- */
 app.post("/register", async (req, res) => {
-  const { username, email, password } = req.body;
+  try {
+    const { username, email, password } = req.body;
 
-  const hash = await bcrypt.hash(password, 10);
-  await User.create({ username, email, password: hash });
+    if (!username || !email || !password) {
+      return res.json({ success: false, message: "All fields required" });
+    }
 
-  res.json({ success: true });
+    const exists = await User.findOne({ email });
+    if (exists) {
+      return res.json({ success: false, message: "User already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = new User({
+      username,
+      email,
+      password: hashedPassword
+    });
+
+    await user.save();
+
+    res.json({ success: true, message: "User registered successfully" });
+
+  } catch (error) {
+    console.error("REGISTER ERROR:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
 /* ---------- LOGIN ---------- */
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(401).json({});
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.json({ success: false, message: "User not found" });
+    }
 
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.status(401).json({});
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.json({ success: false, message: "Invalid credentials" });
+    }
 
-  const token = jwt.sign(
-    { id: user._id, email: user.email },
-    process.env.JWT_SECRET,
-    { expiresIn: "1h" }
-  );
+    const token = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        username: user.username
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
 
-  res.json({ token });
+    res.json({ success: true, token });
+
+  } catch (error) {
+    console.error("LOGIN ERROR:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
-/* ---------- AUTH ---------- */
+/* ---------- JWT AUTH MIDDLEWARE ---------- */
 const auth = (req, res, next) => {
-  const header = req.headers.authorization;
-  if (!header) return res.status(401).json({});
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
+  const token = authHeader.split(" ")[1];
 
   try {
-    const token = header.split(" ")[1];
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
     next();
-  } catch {
-    res.status(401).json({});
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid token" });
   }
 };
 
-/* ---------- FEEDBACK SUBMIT ---------- */
-app.post("/feedback", auth, async (req, res) => {
-  const { name, experience, problems, suggestions } = req.body;
+/* ---------- PROFILE ---------- */
+app.get("/profile", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
 
-  const feedback = await Feedback.create({
-    email: req.user.email,
-    name,
-    experience,
-    problems,
-    suggestions
-  });
+    if (!user) {
+      return res.status(404).json({ success: false });
+    }
 
-  res.json({ success: true, createdAt: feedback.createdAt });
+    res.json({
+      success: true,
+      user: {
+        username: user.username,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
 });
 
-/* ---------- ADMIN VIEW ---------- */
-app.get("/feedback/admin", async (req, res) => {
-  if (req.headers["admin-secret"] !== process.env.ADMIN_SECRET)
-    return res.status(403).json({});
-
-  const data = await Feedback.find().sort({ createdAt: -1 });
-  res.json(data);
+/* ---------- TOTAL USERS COUNT ---------- */
+app.get("/users/count", async (req, res) => {
+  try {
+    const count = await User.countDocuments();
+    res.json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
-/* ---------- SERVER ---------- */
-app.listen(5000, () =>
-  console.log("🚀 Server running on port 5000")
-);
+/* ---------- SERVER START ---------- */
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
