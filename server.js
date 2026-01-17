@@ -6,38 +6,60 @@ import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+/* ---------- ENV CHECK ---------- */
+if (!process.env.MONGO_URI || !process.env.JWT_SECRET) {
+  console.error("❌ Missing environment variables");
+  process.exit(1);
+}
+
 const app = express();
 
 /* ---------- MIDDLEWARE ---------- */
 app.use(cors({
   origin: "*",
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  credentials: true
 }));
 app.use(express.json());
 
+/* ---------- HEALTH CHECK ---------- */
+app.get("/", (req, res) => {
+  res.send("🚀 Backend is running successfully");
+});
+
 /* ---------- MONGODB CONNECTION ---------- */
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  })
   .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.log("❌ MongoDB Error:", err));
+  .catch((err) => {
+    console.error("❌ MongoDB Error:", err);
+    process.exit(1);
+  });
 
 /* ---------- USER SCHEMA ---------- */
-const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true
+const userSchema = new mongoose.Schema(
+  {
+    username: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true
+    },
+    password: {
+      type: String,
+      required: true
+    }
   },
-  email: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  password: {
-    type: String,
-    required: true
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 const User = mongoose.model("User", userSchema);
 
@@ -98,7 +120,15 @@ app.post("/login", async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    res.json({ success: true, token });
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email
+      }
+    });
 
   } catch (error) {
     console.error("LOGIN ERROR:", error);
@@ -131,7 +161,7 @@ app.get("/profile", auth, async (req, res) => {
     const user = await User.findById(req.user.id).select("-password");
 
     if (!user) {
-      return res.status(404).json({ success: false });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
     res.json({
@@ -143,7 +173,7 @@ app.get("/profile", auth, async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -151,9 +181,9 @@ app.get("/profile", auth, async (req, res) => {
 app.get("/users/count", async (req, res) => {
   try {
     const count = await User.countDocuments();
-    res.json({ count });
+    res.json({ success: true, count });
   } catch (error) {
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
